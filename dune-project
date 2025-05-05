@@ -8,3 +8,7 @@
 (package
  (name gen_haskell)
  (depends not_useless))
+
+(package
+ (name gen_lean4)
+ (depends not_useless))

@@ -3,3 +3,10 @@
  (name gen_haskell)
  (libraries not_useless)
  (package gen_haskell))
+
+(executable
+ (public_name gen_lean4)
+ (name gen_lean4)
+ (libraries not_useless)
+ (package gen_lean4)
+ (modes byte exe))
