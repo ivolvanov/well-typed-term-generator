@@ -1,51 +1,51 @@
 open External
-(* open Util *)
 
 let (-->) ty_params ty_body = TyFun (ty_params, ty_body)
-let tInt = TyCons ("Nat", [])
+(* let tInt = TyCons ("Int", []) *)
+let tNat = TyCons ("Nat", [])
+(* let tFloat = TyCons ("Float", []) *)
+(* let tString = TyCons ("String", []) *)
 let tBool = TyCons ("Bool", [])
 let tList ty = TyCons ("List", [ty])
+(* let tArray ty = TyCons ("Array", [ty]) *)
 let tVar a = TyVar a
 
 (* NOTE: no enumFromTo(') or case1 *)
 let lean4_std_lib =
-  [(*("seq",    [tVar "b"; tVar "a"] --> (tVar "a")); *)
-   ("id",     [tVar "a"] --> tVar "a");
-   ("0",      tInt);
-   ("1",      tInt);
-   ("2",      tInt);
-   ("(+)",      [tInt; tInt] --> tInt);
-   ("(-)",      [tInt; tInt] --> tInt);
-   ("Nat.succ", [tInt] --> tInt);
-   (* ("HSub.hSub", [tInt; tInt] --> tInt); *)
-   (* ("List.nil",  tList (tVar "a")); Naturally, this breaks the type inference *)
-   (* ("(:)",    [tVar "a"; tList (tVar "a")] --> tList (tVar "a")); *)
-   ("List.head!",   [tList (tVar "a")] --> tVar "a");
-   ("List.tail",   [tList (tVar "a")] --> tList (tVar "a"));
-   ("List.take",   [tInt; tList (tVar "a")] --> tList (tVar "a"));
-   (* ("(!!)",   [tList (tVar "a"); tInt] --> tVar "a"); *)
-   ("List.length", [tList (tInt)] --> tInt);
-   ("List.or", [tList (tBool)] --> tBool);
-   (*("(++)",   [tList (tVar "a"); tList (tVar "a")] --> tList (tVar "a")); *)
-   (* ("filter", [[tVar "a"] --> tBool; tList (tVar "a")] *)
-              (* --> tList (tVar "a")); *)
-   (*("map",    [[tVar "a"] --> tVar "b"; tList (tVar "a")]
-              --> tList (tVar "b"));
-   ("foldr",  [[tVar "b"; tVar "a"] --> tVar "a";
-               tVar "a";
-               tList (tVar "b")]
-              --> tVar "a"); *)
-   ("Nat.mod",    [tInt; tInt] --> tInt);
-   ("Nat.log2",   [tInt] --> tInt);
-   ("Bool.and",   [tBool; tBool] --> tBool);
-   ("Bool.or",   [tBool; tBool] --> tBool);
-   ("!",    [tBool] --> tBool);
-   ("True",   tBool);
-   ("False",  tBool);
-   ("sorry", tVar "a");
-   (* ("((==)::Int -> Int -> Bool)", [tInt; tInt] --> tBool); *)
-   (* ("((==)::Bool -> Bool -> Bool)", [tBool; tBool] --> tBool); *)
-   (* ("((==)::[Int] -> [Int] -> Bool)", [tList tInt; tList tInt] --> tBool); *)
+  [
+    ("id",              [tVar "a"] --> tVar "a");
+    ("0",               tNat);
+    ("1",               tNat);
+    ("2",               tNat);
+    ("Nat.add",         [tNat; tNat] --> tNat);
+    ("Nat.sub",         [tNat; tNat] --> tNat);
+    ("Nat.succ",        [tNat] --> tNat);
+    ("Nat.pow",         [tNat;tNat] --> tNat);
+    ("List.append",     [tList(tVar "a"); tList (tVar "a")] --> tList (tVar "a"));
+    ("List.head!",      [tList (tVar "a")] --> tVar "a");
+    ("List.tail",       [tList (tVar "a")] --> tList (tVar "a"));
+    ("List.take",       [tNat; tList (tVar "a")] --> tList (tVar "a"));
+    ("List.length",     [tList (tNat)] --> tNat);
+    ("List.or",         [tList (tBool)] --> tBool);
+    ("List.append",     [tList (tVar "a"); tList (tVar "a")] --> tList (tVar "a"));
+    ("List.filter",     [[tVar "a"] --> tBool; tList (tVar "a")]
+                        --> tList (tVar "a"));
+    ("List.map",        [[tVar "a"] --> tVar "b"; tList (tVar "a")]
+                        --> tList (tVar "b"));
+    ("List.foldr",      [[tVar "b"; tVar "a"] --> tVar "a";
+                        tVar "a";
+                        tList (tVar "b")]
+                        --> tVar "a");
+    ("Nat.mod",         [tNat; tNat] --> tNat);
+    ("Nat.log2",        [tNat] --> tNat);
+    ("Bool.and",        [tBool; tBool] --> tBool);
+    ("Bool.or",         [tBool; tBool] --> tBool);
+    ("Bool.not",        [tBool] --> tBool);
+    ("True",            tBool);
+    ("False",           tBool);
+    ("sorry",           tVar "a");
+    ("Nat.beq",         [tNat; tNat] --> tBool);
+    ("List.beq",        [tList tNat; tList tNat] --> tBool);
   ]
 
 let string_of_ty (ty0 : ty) =
@@ -75,7 +75,7 @@ let is_infix f =
   match f with
   | "(+)" | "(-)"
     | "(:)" | "(!!)" | "(++)"
-    | "(&&)" | "(||)" -> true
+    | "(&&)" | "(||)" | "==" -> true
   | _ -> false
 
 let make_infix f =
@@ -83,15 +83,7 @@ let make_infix f =
 
 let rec lean4_string e =
   match e with
-  | Ref (x, _) ->
-      x
-     (* let x_annot () = "(" ^ x ^ ":" ^ ")" in
-     (match List.assoc_opt x haskell_std_lib with
-      | None -> x
-      | Some ty ->
-         if SS.is_empty (ty_vars ty)
-         then x
-         else x_annot ()) *)
+  | Ref (x, _) -> x
   | Lambda (xs, e_body) ->
      (match xs with
       | [] -> lean4_string e_body
@@ -122,10 +114,8 @@ let generate_haskell size =
     | _ -> 1. in
   let weighted_std_lib =
     List.map (fun entry -> (weights (fst entry), entry)) lean4_std_lib in
-  let gen_ty = [tList (tInt)] --> tInt in
-  (* let gen_ty = [tInt; tInt; tInt] --> tInt in *)
-  (* let gen_ty = [tInt] --> tInt in *)
-  Generate.generate_exp weighted_std_lib size tInt gen_ty
+  let gen_ty = [tList (tNat)] --> tNat in
+  Generate.generate_exp weighted_std_lib size tNat gen_ty
   (* TODO: program stats in debug mode *)
 
 let generate_batch exp_size batch_size =
@@ -156,10 +146,7 @@ let print_file fs =
     ] in
 
   print_lines "" "" prelude;
-  (* print_endline "codeList :: [[Int] -> [Int]]"; *)
-  (* print_endline "codeList = ["; *)
   print_lines "#check " "" fs;
-  (* print_endline "  ]"; *)
   print_lines "" "" main
 
 let n = ref 100
