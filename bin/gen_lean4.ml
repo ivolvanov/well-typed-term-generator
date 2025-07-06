@@ -5,48 +5,44 @@ let (-->) ty_params ty_body = TyFun (ty_params, ty_body)
 let tNat = TyCons ("Nat", [])
 (* let tFloat = TyCons ("Float", []) *)
 (* let tString = TyCons ("String", []) *)
-let tBool = TyCons ("Bool", [])
-let tList ty = TyCons ("List", [ty])
-(* let tArray ty = TyCons ("Array", [ty]) *)
-let tVar a = TyVar a
+(* let tBool = TyCons ("Bool", []) *)
+(* let tList ty = TyCons ("List", [ty]) *)
+let tVec ty = TyVec(ty, 0)
+let tVecN ty n = TyVec(ty, n)
+(* let tVar a = TyVar a *)
 
-(* NOTE: no enumFromTo(') or case1 *)
+let make_vector_functions () =
+  let vector_fns = ref [] in
+  
+  for n = 3 to 100 do
+    vector_fns := ("Vector.push", [tVecN tNat n; tNat] --> tVecN tNat (n+1)) :: !vector_fns;
+
+    if n >= 1 then
+      vector_fns := ("Vector.head", [tVecN tNat n] --> tNat) :: !vector_fns;
+      vector_fns := ("Vector.tail", [tVecN tNat n] --> tVecN tNat (n-1)) :: !vector_fns;
+      vector_fns := ("Vector.pop",  [tVecN tNat n] --> tVecN tNat (n-1)) :: !vector_fns;
+  done;
+  
+  !vector_fns
+
 let lean4_std_lib =
-  [
-    ("id",              [tVar "a"] --> tVar "a");
-    ("0",               tNat);
+  let base_fns = [
+    (* ("id",              [tVar "a"] --> tVar "a"); *)
     ("1",               tNat);
-    ("2",               tNat);
     ("Nat.add",         [tNat; tNat] --> tNat);
     ("Nat.sub",         [tNat; tNat] --> tNat);
+    ("Nat.mul",         [tNat; tNat] --> tNat);
     ("Nat.succ",        [tNat] --> tNat);
+    ("Nat.pred",        [tNat] --> tNat);
     ("Nat.pow",         [tNat;tNat] --> tNat);
-    ("List.append",     [tList(tVar "a"); tList (tVar "a")] --> tList (tVar "a"));
-    ("List.head!",      [tList (tVar "a")] --> tVar "a");
-    ("List.tail",       [tList (tVar "a")] --> tList (tVar "a"));
-    ("List.take",       [tNat; tList (tVar "a")] --> tList (tVar "a"));
-    ("List.length",     [tList (tNat)] --> tNat);
-    ("List.or",         [tList (tBool)] --> tBool);
-    ("List.append",     [tList (tVar "a"); tList (tVar "a")] --> tList (tVar "a"));
-    ("List.filter",     [[tVar "a"] --> tBool; tList (tVar "a")]
-                        --> tList (tVar "a"));
-    ("List.map",        [[tVar "a"] --> tVar "b"; tList (tVar "a")]
-                        --> tList (tVar "b"));
-    ("List.foldr",      [[tVar "b"; tVar "a"] --> tVar "a";
-                        tVar "a";
-                        tList (tVar "b")]
-                        --> tVar "a");
-    ("Nat.mod",         [tNat; tNat] --> tNat);
-    ("Nat.log2",        [tNat] --> tNat);
-    ("Bool.and",        [tBool; tBool] --> tBool);
-    ("Bool.or",         [tBool; tBool] --> tBool);
-    ("Bool.not",        [tBool] --> tBool);
-    ("True",            tBool);
-    ("False",           tBool);
-    ("sorry",           tVar "a");
-    ("Nat.beq",         [tNat; tNat] --> tBool);
-    ("List.beq",        [tList tNat; tList tNat] --> tBool);
-  ]
+    ("Nat.max",         [tNat; tNat] --> tNat);
+    ("Nat.min",         [tNat; tNat] --> tNat);
+    (".size",           [tVec tNat] --> tNat);
+    ("Vector.map",      [[tNat] --> tNat; tVec tNat] --> tVec tNat);
+    ("Vector.sum",      [tVec tNat] --> tNat);
+    ("Vector.length",   [tVec tNat] --> tNat);
+  ] in
+  base_fns @ (make_vector_functions ())
 
 let string_of_ty (ty0 : ty) =
   let rec lp wr ty =
@@ -63,6 +59,8 @@ let string_of_ty (ty0 : ty) =
         | [] -> n
         | _ ->
            wrap (n ^ " " ^ String.concat " " (List.map (lp true) tys)))
+    | TyVec (par_ty, size) -> 
+        wrap("Vector " ^ lp true par_ty ^ " " ^ string_of_int size)
     | TyFun (param_tys, body_ty) ->
        match param_tys with
        | [] -> lp wr body_ty
@@ -77,10 +75,17 @@ let is_infix f =
     | "(:)" | "(!!)" | "(++)"
     | "(&&)" | "(||)" | "==" -> true
   | _ -> false
+  
+let is_postfix f =
+  (* print_endline ("AAA"); *)
+  match f with
+  | ".size" -> true
+  (* | ".sum" -> true *)
+  | _ -> false
 
 let make_infix f =
   String.sub f 1 (String.length f - 2)
-
+  
 let rec lean4_string e =
   match e with
   | Ref (x, _) -> x
@@ -97,12 +102,16 @@ let rec lean4_string e =
         "(" ^ lean4_string e1 ^
         " " ^ make_infix f ^ " " ^
         lean4_string e2 ^ ")"
+     | Ref (f, _), [e1] when is_postfix f ->
+        "(" ^ lean4_string e1 ^ f ^ ")"
      | _, _ ->
         match e_args with
         | [] -> lean4_string e_f
         | _ ->
           "(" ^ lean4_string e_f ^ " " ^
           String.concat " " (List.map lean4_string e_args) ^ ")")
+  | Vec (elems, _) ->
+     "#v[" ^ String.concat ", " (List.map lean4_string elems) ^ "]"
   | Let ((_, _), _, _) -> raise Util.Unimplemented
 
 let generate_haskell size =
@@ -114,8 +123,8 @@ let generate_haskell size =
     | _ -> 1. in
   let weighted_std_lib =
     List.map (fun entry -> (weights (fst entry), entry)) lean4_std_lib in
-  let gen_ty = [tList (tNat)] --> tNat in
-  Generate.generate_exp weighted_std_lib size tNat gen_ty
+  let gen_ty = [tVec tNat] --> tVec tNat in
+  Generate.generate_exp weighted_std_lib size (tVec tNat) gen_ty
   (* TODO: program stats in debug mode *)
 
 let generate_batch exp_size batch_size =

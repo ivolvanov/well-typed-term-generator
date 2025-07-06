@@ -157,3 +157,17 @@ let lambda_step (hole : hole_info) =
      hole.hole_exp := Exp.ExtLambda (evar, xs, body);
      [body]
   | _ -> invalid_arg "lambda_step with hole of non-function type"
+
+
+(* Implements the rule:
+   E[<>] ~> E[v#[<>, <>, ...]] where <> has type tau and hole has type Vector tau n
+ *)
+let vec_step (hole : hole_info) =
+  match UnionFind.get hole.hole_ty with
+  | Exp.TyVec (elem_ty, size) ->
+     fun () ->
+     Debug.say (fun () -> "creating vector");
+     let elem_holes = List.init size (fun _ -> ref (Exp.Hole (elem_ty, hole.hole_env))) in
+     hole.hole_exp := Exp.Vec (elem_holes, hole.hole_ty);
+     elem_holes
+  | _ -> invalid_arg "vec_step with hole of non-vector type"

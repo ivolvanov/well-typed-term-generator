@@ -70,6 +70,10 @@ let ext_lambda_steps weight (hole : hole_info) =
   | TyArrowExt _ -> [(weight hole, Rules.lambda_step hole)]
   | _ -> []
 
+let vec_steps weight (hole : hole_info) =
+  match UnionFind.get hole.hole_ty with
+  | TyVec _ -> [(weight hole, Rules.vec_step hole)]
+  | _ -> []
 
 type step = float * (unit -> Exp.exp list)
 type t = (hole_info -> step list) list
@@ -94,6 +98,7 @@ let main ext_refs : t =
     call_ref_steps                   ( w_fuel 2.         );
     call_external_ref_steps ext_refs ( w_fuel 1.         );
     s Rules.ext_function_call_step   ( w_fuel 1.         );
+    vec_steps                        ( w_fuel_base 3. 5. );
     (* s Rules.function_call_step      ( w_fuel 1.         );*)
   ]
 

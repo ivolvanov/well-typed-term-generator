@@ -11,11 +11,13 @@ type exp_node =
   | Call of exp * exp list
   | ExtLambda of extvar * var list ref * exp
   | ExtCall of exp * extvar * exp list ref
+  | Vec of exp list * ty
 and exp = exp_node ref
 and ty_node =
   | TyCons of string * ty list
   | TyArrow of ty list * ty
   | TyArrowExt of extvar * ty
+  | TyVec of ty * int
   | TyUnif of ty
 and ty = ty_node UnionFind.elem
 and extvar = {
@@ -100,6 +102,7 @@ let rec ty_contains_extvar evar ty =
      ty_contains_extvar evar ty_body
   | TyArrowExt (evar', ty_body) ->
      evar == evar' || ty_contains_extvar evar ty_body
+  | TyVec (ty, _) -> ty_contains_extvar evar ty
   | TyUnif _ -> false
 
 (* TODO: shadowing? *)
@@ -129,6 +132,7 @@ let rec unify ty10 ty20 =
          List.exists lp_ty ty_args || lp_ty ty_body
       | TyArrowExt (evar, ty_body) ->
          List.exists lp_ty evar.param_tys || lp_ty ty_body
+      | TyVec (ty, _) -> lp_ty ty
       | TyUnif _ -> false in
     lp_ty_node ty_node0 in
 
@@ -158,6 +162,11 @@ let rec unify ty10 ty20 =
          if evar1 != evar2
          then raise UnificationError
          else unify ty_body1 ty_body2;
+              ty_node1
+      | TyVec (ty1, size1), TyVec (ty2, size2) ->
+         if size1 <> size2
+         then raise UnificationError
+         else unify ty1 ty2;
               ty_node1
       | _, _ -> raise UnificationError)
     ty10 ty20 in ()
@@ -194,6 +203,7 @@ let can_unify ty10 ty20 =
          List.exists (lp_ty mp) ty_args || lp_ty mp ty_body
       | TyArrowExt (evar, ty_body) ->
          List.exists (lp_ty mp) evar.param_tys || lp_ty mp ty_body
+      | TyVec (ty, _) -> lp_ty mp ty
       | TyUnif ty ->
          match lookup ty mp with
          | None -> false
@@ -230,6 +240,10 @@ let can_unify ty10 ty20 =
        if evar1 != evar2
        then raise UnificationError
        else lp mp ty_body1 ty_body2
+    | TyVec (ty1, size1), TyVec (ty2, size2) ->
+       if size1 <> size2
+       then raise UnificationError
+       else lp mp ty1 ty2
     | _, _ -> raise UnificationError
   in
   try
@@ -266,7 +280,8 @@ let ty_of_external_ty (ty_top : External.ty) =
         | _ -> make_ty (TyCons (name, List.map lp ty_args)))
     | TyFun (arg_tys, ty_body) ->
        make_ty (TyArrow (List.map lp arg_tys, lp ty_body))
-    | TyVar a -> SM.find a vars_map in
+    | TyVar a -> SM.find a vars_map
+    | TyVec (ty, size) -> make_ty (TyVec (lp ty, size)) in
   lp ty_top
 
 
@@ -279,6 +294,7 @@ let ty_to_external_ty uty ty0 : External.ty =
        External.TyCons (name, List.map lp tys)
     | TyArrow (ty_args, ty_body) ->
        External.TyFun (List.map lp ty_args, lp ty_body)
+    | TyVec (vty, size) -> External.TyVec (lp vty, size)
     | TyArrowExt (evar, ty_body) ->
        lp (make_ty (TyArrow (evar.param_tys, ty_body))) in
   lp ty0
@@ -312,6 +328,9 @@ let exp_to_external_exp uty e0 =
        External.Call
          (lp env e_f,
           List.map (lp env) e_args)
+    | Vec (e_elems, vec_ty) ->
+       External.Vec
+         (List.map (lp env) e_elems, ty_to_external_ty uty vec_ty)
     | ExtLambda (_, xs, e_body) ->
        lp env (ref (Lambda (!xs, e_body)))
     | ExtCall (e_f, _, e_args) ->
@@ -341,6 +360,8 @@ let ensure_var_in_env (x : var) (env : env) =
   then ()
   else raise (ConsistencyError "var not bound in env")
 
+(* TODO: consistency of vectors is not checked properly because the vec size
+   is not properly encoded in the type to begin with *)
 let rec consistency_check_ty ty =
   match UnionFind.get ty with
   | TyUnif ty' ->
@@ -354,6 +375,7 @@ let rec consistency_check_ty ty =
   | TyArrowExt (evar, ty_body) ->
      List.iter consistency_check_ty evar.param_tys;
      consistency_check_ty ty_body
+  | TyVec (vty, _) -> consistency_check_ty vty
 
 let rec consistency_check env e =
   match !e with
@@ -376,6 +398,9 @@ let rec consistency_check env e =
   | Call (e_f, e_args) ->
      consistency_check env e_f;
      List.iter (consistency_check env) e_args
+  | Vec (e_elems, vec_ty) ->
+     consistency_check_ty vec_ty;
+     List.iter (consistency_check env) e_elems
   | ExtLambda (evar, params, e_body) ->
      if not (List.memq params evar.lambdas)
      then raise (ConsistencyError "ext. lambda params not in extvar");
@@ -418,7 +443,6 @@ let rec ensure_same_ty ty1 ty2 =
       | _, _ -> raise (TypeCheckError "different type constructors"))
     ty1 ty2 in ()
 
-(* typecheck *)
 let typecheck ext_refs (e : exp) =
   let rec lp (e : exp) =
     match !e with
@@ -447,6 +471,16 @@ let typecheck ext_refs (e : exp) =
                       e_args ty_args;
            ty_body
         | _ -> raise (TypeCheckError "call of non-function"))
+    | Vec (e_elems, vec_ty) ->
+       (match UnionFind.get vec_ty with
+        | TyVec (elem_ty, size) ->
+           if List.length e_elems <> size
+           then raise (TypeCheckError "vector size mismatch");
+           List.iter (fun e_elem ->
+                        ensure_same_ty (lp e_elem) elem_ty)
+                     e_elems;
+           vec_ty
+        | _ -> raise (TypeCheckError "Vec expression with non-vector type"))
     | ExtLambda (extvar, params, e_body) ->
        if List.length extvar.param_tys <> List.length !params
        then raise (TypeCheckError "different ext lambda params length");
