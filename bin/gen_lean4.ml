@@ -1,47 +1,121 @@
 open External
 
 let (-->) ty_params ty_body = TyFun (ty_params, ty_body)
-(* let tInt = TyCons ("Int", []) *)
 let tNat = TyCons ("Nat", [])
-(* let tFloat = TyCons ("Float", []) *)
-(* let tString = TyCons ("String", []) *)
-(* let tBool = TyCons ("Bool", []) *)
-(* let tList ty = TyCons ("List", [ty]) *)
-let tVec ty = TyVec(ty, 0)
-let tVecN ty n = TyVec(ty, n)
+let tFloat = TyCons ("Float", [])
+let tString = TyCons ("String", [])
+let tBool = TyCons ("Bool", [])
+let tVec ty n = TyVec(ty, n)
 (* let tVar a = TyVar a *)
+
+let generate_complex_types max_depth =
+  let base_types = [tNat; tFloat; tString; tBool] in
+  
+  let rec generate_type depth =
+    if depth <= 0 then
+      List.nth base_types (Random.int (List.length base_types))
+    else
+      match Random.int 4 with
+      | 0 ->
+        let arg_type = generate_type (depth - 1) in
+        let ret_type = generate_type (depth - 1) in
+        [arg_type] --> ret_type
+      | 1 ->
+        let num_args = 1 + Random.int 3 in
+        let arg_types = List.init num_args (fun _ -> generate_type (depth - 1)) in
+        let ret_type = generate_type (depth - 1) in
+        arg_types --> ret_type
+      | 2 ->
+        let elem_type = generate_type (depth - 1) in
+        let size = 1 + Random.int 5 in
+        tVec elem_type size
+      | _ ->
+        List.nth base_types (Random.int (List.length base_types))
+  in
+  
+  let complex_types = ref [] in
+  for _ = 1 to 20 do
+    let ty = generate_type max_depth in
+    complex_types := ty :: !complex_types
+  done;
+  !complex_types
 
 let make_vector_functions () =
   let vector_fns = ref [] in
   
-  for n = 3 to 100 do
-    vector_fns := ("Vector.push", [tVecN tNat n; tNat] --> tVecN tNat (n+1)) :: !vector_fns;
+  let base_element_types = [
+    ("Nat", tNat);
+    ("Float", tFloat);
+    ("String", tString);
+    ("Bool", tBool);
+  ] in
+  
+  let complex_types = generate_complex_types 3 in
+  let complex_element_types = List.mapi (fun i ty -> 
+    ("Complex" ^ string_of_int i, ty)) complex_types in
+  
+  let element_types = base_element_types @ complex_element_types in
+  
+  for n = 1 to 20 do
+    List.iter (fun (_, elem_type) ->
 
-    if n >= 1 then
-      vector_fns := ("Vector.head", [tVecN tNat n] --> tNat) :: !vector_fns;
-      vector_fns := ("Vector.tail", [tVecN tNat n] --> tVecN tNat (n-1)) :: !vector_fns;
-      vector_fns := ("Vector.pop",  [tVecN tNat n] --> tVecN tNat (n-1)) :: !vector_fns;
+      vector_fns := ("Vector.push", [tVec elem_type n; elem_type] --> tVec elem_type (n+1)) :: !vector_fns;
+      vector_fns := ("Vector.head", [tVec elem_type n] --> elem_type) :: !vector_fns;
+      vector_fns := (".size",       [tVec elem_type n] --> tNat) :: !vector_fns;
+
+      if n >= 2 then
+        vector_fns := ("Vector.tail", [tVec elem_type n] --> tVec elem_type (n-1)) :: !vector_fns;
+        vector_fns := ("Vector.pop", [tVec elem_type n] --> tVec elem_type (n-1)) :: !vector_fns;
+        
+      vector_fns := ("Vector.map", [[elem_type] --> elem_type; tVec elem_type n] --> tVec elem_type n) :: !vector_fns;
+      vector_fns := ("Vector.foldl", [[elem_type; elem_type] --> elem_type; elem_type; tVec elem_type n] --> elem_type) :: !vector_fns;
+      vector_fns := ("Vector.foldr", [[elem_type; elem_type] --> elem_type; elem_type; tVec elem_type n] --> elem_type) :: !vector_fns;
+      
+    ) element_types;
   done;
   
   !vector_fns
 
 let lean4_std_lib =
   let base_fns = [
-    (* ("id",              [tVar "a"] --> tVar "a"); *)
     ("1",               tNat);
+    ("2",               tNat);
+    ("1.1",             tFloat);
+    ("4.2",             tFloat);
+    ("\"hello\"",       tString);
+    ("\"world\"",       tString);
+    ("\"\"",            tString);
+    ("true",            tBool);
+    ("false",           tBool);
+    
     ("Nat.add",         [tNat; tNat] --> tNat);
     ("Nat.sub",         [tNat; tNat] --> tNat);
     ("Nat.mul",         [tNat; tNat] --> tNat);
     ("Nat.succ",        [tNat] --> tNat);
     ("Nat.pred",        [tNat] --> tNat);
-    ("Nat.pow",         [tNat;tNat] --> tNat);
+    ("Nat.pow",         [tNat; tNat] --> tNat);
     ("Nat.max",         [tNat; tNat] --> tNat);
     ("Nat.min",         [tNat; tNat] --> tNat);
-    (".size",           [tVec tNat] --> tNat);
-    ("Vector.map",      [[tNat] --> tNat; tVec tNat] --> tVec tNat);
-    ("Vector.sum",      [tVec tNat] --> tNat);
-    ("Vector.length",   [tVec tNat] --> tNat);
+    
+    ("Float.add",       [tFloat; tFloat] --> tFloat);
+    ("Float.sub",       [tFloat; tFloat] --> tFloat);
+    ("Float.mul",       [tFloat; tFloat] --> tFloat);
+    ("Float.div",       [tFloat; tFloat] --> tFloat);
+    
+    ("String.append",   [tString; tString] --> tString);
+    ("String.length",   [tString] --> tNat);
+    
+    ("Bool.and",        [tBool; tBool] --> tBool);
+    ("Bool.or",         [tBool; tBool] --> tBool);
+    ("Bool.not",        [tBool] --> tBool);
+    
+    ("Nat.beq",          [tNat; tNat] --> tBool);
+    ("Float.beq",        [tFloat; tFloat] --> tBool);
+    
+    ("Nat.toFloat",     [tNat] --> tFloat);
+    ("Float.toString",  [tFloat] --> tString);
   ] in
+  
   base_fns @ (make_vector_functions ())
 
 let string_of_ty (ty0 : ty) =
@@ -123,8 +197,8 @@ let generate_haskell size =
     | _ -> 1. in
   let weighted_std_lib =
     List.map (fun entry -> (weights (fst entry), entry)) lean4_std_lib in
-  let gen_ty = [tVec tNat] --> tVec tNat in
-  Generate.generate_exp weighted_std_lib size (tVec tNat) gen_ty
+  let gen_ty = ([tNat; tNat; ([tBool] --> tNat); ([tString; tString; tFloat] --> ([tNat; tVec (tVec (tBool) 97) 68] --> tVec (([tString; tFloat] --> tFloat)) 59))] --> tNat) in
+  Generate.generate_exp weighted_std_lib size tBool gen_ty
   (* TODO: program stats in debug mode *)
 
 let generate_batch exp_size batch_size =
